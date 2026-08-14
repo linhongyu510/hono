@@ -71,16 +71,17 @@ describe('Adapter for Cloudflare Pages', () => {
     const eventContext = createEventContext({ request })
     const app = new Hono().basePath('/api')
 
-    app.onError((e) => {
-      throw e
-    })
+    const basePath = vi.spyOn(app, 'basePath')
+    app.onError((c) => c.text(c.error!.message, 500))
     app.get('/error', () => {
       throw new Error('Custom Error')
     })
 
     const handler = handle(app)
-    // It does throw the error if app is NOT "subApp"
-    expect(() => handler(eventContext)).toThrowError('Custom Error')
+    const res = await handler(eventContext)
+    expect(res.status).toBe(500)
+    expect(await res.text()).toBe('Custom Error')
+    expect(basePath).not.toHaveBeenCalled()
   })
 })
 

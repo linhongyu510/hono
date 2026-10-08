@@ -56,7 +56,6 @@ describe('Param', () => {
 
     // Single param access should be empty string, not undefined
     expect(req.param('remaining')).toBe('')
-
     // All params should include key with empty string value
     const all = req.param()
     expect(all).toEqual({ remaining: '' })
@@ -117,7 +116,7 @@ describe('Param', () => {
   describe('Type', () => {
     it('param() returns string | undefined when P is any (middleware context)', () => {
       // When middleware uses Context without an explicit path type, P defaults to any.
-      // param(key) should return string | undefined, not string.
+      // param(key) should return string | undefined, not string
       const rawRequest = new Request('http://localhost/users/123')
       const req = new HonoRequest<any>(rawRequest, '/users/123', [
         [[[undefined, {} as RouterRoute], { id: '123' }]],
@@ -126,9 +125,9 @@ describe('Param', () => {
     })
 
     it('param() returns string when P is a known route string', () => {
-      // When P is a concrete route, named params should still return string (non-optional).
-      const rawRequest = new Request('http://localhost/123')
-      const req = new HonoRequest<'/:id'>(rawRequest, '/123', [
+      // When P is a concrete route, named params should return string (not undefined)
+      const rawRequest = new Request('http://localhost/users/123')
+      const req = new HonoRequest<'/users/:id'>(rawRequest, '/users/123', [
         [[[undefined, {} as RouterRoute], { id: '123' }]],
       ])
       expectTypeOf(req.param('id')).toEqualTypeOf<string>()
@@ -415,6 +414,23 @@ describe('Body methods with caching', () => {
       expect((await req.formData()).get('foo')).toBe('bar')
     })
 
+    test('req.formData() after req.text() preserves binary file parts', async () => {
+      const fd = new FormData()
+      fd.append(
+        'file',
+        new File([new Uint8Array([0xff, 0x00, 0x41])], 'x.bin', { type: 'application/octet-stream' })
+      )
+      const req = new HonoRequest(
+        new Request('http://localhost', {
+          method: 'POST',
+          body: fd,
+        })
+      )
+      await req.text()
+      const file = (await req.formData()).get('file') as File
+      expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array([0xff, 0x00, 0x41]))
+    })
+
     test('the cached representation is still returned unchanged', async () => {
       const req = new HonoRequest(
         new Request('http://localhost', {
@@ -535,12 +551,12 @@ describe('Body methods with caching', () => {
 
       it('{dot: true}', async () => {
         expectTypeOf((await req.parseBody({ dot: true }))['key']).toEqualTypeOf<
-          string | File | RecursiveRecord<string, string | File>
+          RecursiveRecord<string, string | File>
         >()
       })
 
       it('{all: true, dot: true}', async () => {
-        expectTypeOf((await req.parseBody({ all: true, dot: true }))['key']).toEqualTypeOf<
+        expectTypeOf((await req.parseBody({ all: true, dot: true })).key).toEqualTypeOf<
           | string
           | File
           | (string | File)[]

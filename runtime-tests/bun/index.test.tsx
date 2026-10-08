@@ -40,6 +40,28 @@ describe('Basic', () => {
   })
 })
 
+describe('Multipart uploads', () => {
+  it('preserves binary files after middleware reads the generated multipart body as text', async () => {
+    const app = new Hono()
+    app.use('*', async (c, next) => {
+      await c.req.text()
+      await next()
+    })
+    app.post('/upload', async (c) => {
+      const data = await c.req.formData()
+      const file = data.get('file') as File
+      return c.body(await file.arrayBuffer())
+    })
+
+    const bytes = Uint8Array.from({ length: 256 }, (_, i) => i)
+    const data = new FormData()
+    data.append('file', new File([bytes], 'upload.bin', { type: 'application/octet-stream' }))
+    const res = await app.request('/upload', { method: 'POST', body: data })
+    expect(res.status).toBe(200)
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes)
+  })
+})
+
 describe('Environment Variables', () => {
   it('Should return the environment variable', async () => {
     const c = new Context(new Request('http://localhost/'))

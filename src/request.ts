@@ -214,7 +214,7 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
     return parseBody(this, options)
   }
 
-  #cachedBody = (key: keyof Body) => {
+  #cachedBody = (key: keyof Body): Promise<Body[keyof Body]> => {
     const { bodyCache, raw } = this
     const cachedBody = bodyCache[key]
 
@@ -238,6 +238,14 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
           headers: contentType ? { 'Content-Type': contentType } : undefined,
         })[key]()
       })
+    }
+
+    if (
+      key === 'text' &&
+      /^multipart\/form-data(?:\s*;|\s*$)/i.test(raw.headers.get('content-type') ?? '')
+    ) {
+      // Keep the original bytes: decoding binary file parts as UTF-8 is lossy.
+      return this.#cachedBody('arrayBuffer').then((body: ArrayBuffer) => new Response(body).text())
     }
 
     return (bodyCache[key] = raw[key]())

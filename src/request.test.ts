@@ -429,6 +429,105 @@ describe('Body methods with caching', () => {
     })
   })
 
+  describe('multipart binary data after text reads', () => {
+    const bytes = Uint8Array.from({ length: 256 }, (_, i) => i)
+    const createRequest = async () => {
+      const data = new FormData()
+      data.append('title', '你好 🌍')
+      data.append('file', new File([bytes], 'upload.bin', { type: 'application/octet-stream' }))
+      const raw = new Request('http://localhost/upload', { method: 'POST', body: data })
+      const buffer = await raw.clone().arrayBuffer()
+      raw.headers.set('Content-Length', buffer.byteLength.toString())
+      return { req: new HonoRequest(raw), buffer }
+    }
+
+    for (const first of ['text', 'json'] as const) {
+      test(`preserves uploaded bytes after ${first}()`, async () => {
+        const { req, buffer } = await createRequest()
+        if (first === 'json') {
+          await expect(req.json()).rejects.toBeInstanceOf(SyntaxError)
+        } else {
+          expect(await req.text()).toBe(new TextDecoder().decode(buffer))
+        }
+        for (let i = 0; i < 2; i++) {
+          const data = await req.formData()
+          expect(data.get('title')).toBe('你好 🌍')
+          const file = data.get('file') as File
+          expect(file.name).toBe('upload.bin')
+          expect(file.type).toBe('application/octet-stream')
+          expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes)
+        }
+        expect(await req.text()).toBe(new TextDecoder().decode(buffer))
+      })
+    }
+
+    test('preserves uploaded bytes during concurrent text and form reads', async () => {
+      const { req, buffer } = await createRequest()
+      const [text, data] = await Promise.all([req.text(), req.formData()])
+      expect(text).toBe(new TextDecoder().decode(buffer))
+      expect(new Uint8Array(await (data.get('file') as File).arrayBuffer())).toEqual(bytes)
+    })
+
+    for (const method of ['arrayBuffer', 'bytes', 'blob'] as const) {
+      test(`preserves the original multipart body in ${method}()`, async () => {
+        const { req, buffer } = await createRequest()
+        await req.text()
+        const body = await req[method]()
+        const result = body instanceof Blob ? await body.arrayBuffer() : body
+        expect(new Uint8Array(result)).toEqual(new Uint8Array(buffer))
+      })
+    }
+
+    test('preserves uploaded bytes in parseBody()', async () => {
+      const { req } = await createRequest()
+      await req.text()
+      const data = await req.parseBody()
+      expect(data.title).toBe('你好 🌍')
+      expect(new Uint8Array(await (data.file as File).arrayBuffer())).toEqual(bytes)
+    })
+
+    test('clones the original multipart bytes and headers after a text read', async () => {
+      const { req, buffer } = await createRequest()
+      await req.text()
+      const cloned = await cloneRawRequest(req)
+      expect(cloned.headers.get('Content-Type')).toBe(req.header('Content-Type'))
+      expect(cloned.headers.get('Content-Length')).toBe(buffer.byteLength.toString())
+      expect(new Uint8Array(await cloned.clone().arrayBuffer())).toEqual(new Uint8Array(buffer))
+      const file = (await cloned.formData()).get('file') as File
+      expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes)
+    })
+
+    test('recognizes a case-insensitive multipart media type', async () => {
+      const { req, buffer } = await createRequest()
+      req.raw.headers.set(
+        'Content-Type',
+        req.header('Content-Type')!.replace('multipart/form-data;', 'Multipart/Form-Data ;')
+      )
+      await req.text()
+      expect(new Uint8Array(await req.arrayBuffer())).toEqual(new Uint8Array(buffer))
+    })
+
+    test('propagates body stream errors to subsequent reads', async () => {
+      const error = new Error('upload interrupted')
+      const req = new HonoRequest(
+        new Request('http://localhost', {
+          method: 'POST',
+          headers: { 'Content-Type': 'multipart/form-data; boundary=test' },
+          body: new ReadableStream({
+            start(controller) {
+              controller.error(error)
+            },
+          }),
+          duplex: 'half',
+        } as RequestInit)
+      )
+      await expect(req.text()).rejects.toBe(error)
+      await expect(req.formData()).rejects.toBe(error)
+      await expect(req.arrayBuffer()).rejects.toBe(error)
+      await expect(req.text()).rejects.toBe(error)
+    })
+  })
+
   describe('req.parseBody()', async () => {
     it('should parse form data', async () => {
       const data = new FormData()

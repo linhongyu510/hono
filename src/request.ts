@@ -26,9 +26,9 @@ type Body = {
 }
 type BodyCache = Partial<Body>
 
-type OptionalRequestInitProperties = 'window' | 'priority'
-type RequiredRequestInit = Required<Omit<RequestInit, OptionalRequestInitProperties>> & {
-  [Key in OptionalRequestInitProperties]?: RequestInit[Key]
+type OptionalRequestProperties = 'window' | 'priority'
+type RequiredRequestInit = Required<Omit<RequestInit, OptionalRequestProperties>> & {
+  [Key in OptionalRequestProperties]?: RequestInit[Key]
 }
 
 export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
@@ -83,8 +83,6 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
    *
    * @example
    * ```ts
-   * const name = c.req.param('name')
-   * // or all parameters at once
    * const { id, comment_id } = c.req.param()
    * ```
    */
@@ -125,7 +123,7 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
   }
 
   /**
-   * `.query()` can get querystring parameters.
+   * `.query()` can get querystring parameters
    *
    * @see {@link https://hono.dev/docs/api/request#query}
    *
@@ -133,12 +131,7 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
    * ```ts
    * // Query params
    * app.get('/search', (c) => {
-   *   const query = c.req.query('q')
-   * })
-   *
-   * // Get all params at once
-   * app.get('/search', (c) => {
-   *   const { q, limit, offset } = c.req.query()
+   *   const q = c.req.query('q')
    * })
    * ```
    */
@@ -155,8 +148,8 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
    *
    * @example
    * ```ts
+   * // tags will be string[]
    * app.get('/search', (c) => {
-   *   // tags will be string[]
    *   const tags = c.req.queries('tags')
    * })
    * ```
@@ -272,7 +265,12 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
    * ```
    */
   text(): Promise<string> {
-    return this.#cachedBody('text')
+    // Derive the text from the raw bytes so that the undecoded body is retained in
+    // `bodyCache`. Building another representation (e.g. `formData()`) from a cached
+    // lossy string would corrupt binary parts (each non-UTF-8 byte becomes U+FFFD).
+    return this.#cachedBody('arrayBuffer').then((buffer: ArrayBuffer) =>
+      new TextDecoder().decode(buffer)
+    )
   }
 
   /**
@@ -351,7 +349,7 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
    * @param target - The target of the validation.
    * @returns The validated data.
    *
-   * @see https://hono.dev/docs/api/request#valid
+   * @see {@link https://hono.dev/docs/api/request#valid}
    */
   valid<T extends keyof I & keyof ValidationTargets>(target: T): InputToDataByTarget<I, T>
   valid(target: keyof ValidationTargets) {
@@ -367,7 +365,6 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
    * ```ts
    * app.get('/about/me', (c) => {
    *   const url = c.req.url // `http://localhost:8787/about/me`
-   *   ...
    * })
    * ```
    */
@@ -376,7 +373,7 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
   }
 
   /**
-   * `.method` can get the method name of the request.
+   * `.method` can get the method name.
    *
    * @see {@link https://hono.dev/docs/api/request#method}
    *
@@ -396,28 +393,22 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
   }
 
   /**
-   * `.matchedRoutes` can return a matched route in the handler
+   * `.matchedRoutes()` can return a matched route in the handler
    *
    * @deprecated
    *
    * Use matchedRoutes helper defined in "hono/route" instead.
    *
-   * @see {@link https://hono.dev/docs/api/request#matchedroutes}
+   * @see {@link https://hono.dev/docs/api/request#matchedRoutes}
    *
    * @example
    * ```ts
    * app.use('*', async function logger(c, next) {
    *   await next()
    *   c.req.matchedRoutes.forEach(({ handler, method, path }, i) => {
-   *     const name = handler.name || (handler.length < 2 ? '[handler]' : '[middleware]')
-   *     console.log(
-   *       method,
-   *       ' ',
-   *       path,
-   *       ' '.repeat(Math.max(10 - path.length, 0)),
-   *       name,
-   *       i === c.req.routeIndex ? '<- respond from here' : ''
-   *     )
+   *     if (method === 'GET') {
+   *       console.log(method, path, handler.name, handler.length < 2 ? '[handler]' : '[middleware]')
+   *     }
    *   })
    * })
    * ```
@@ -427,18 +418,18 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
   }
 
   /**
-   * `.routePath` can retrieve the path registered within the handler
+   * `.routePath` can get the path string of the route
    *
    * @deprecated
    *
    * Use routePath helper defined in "hono/route" instead.
    *
-   * @see {@link https://hono.dev/docs/api/request#routepath}
+   * @see {@link https://hono.dev/docs/api/request#routePath}
    *
    * @example
    * ```ts
    * app.get('/posts/:id', (c) => {
-   *   return c.json({ path: c.req.routePath })
+   *   const path = c.req.routePath // `/posts/:id`
    * })
    * ```
    */
@@ -458,7 +449,7 @@ export class HonoRequest<P extends string = '/', I extends Input['out'] = {}> {
  * - Process the same request body multiple times
  * - Pass requests to external services after validation
  *
- * @param req - The HonoRequest object to clone
+ * @param req The HonoRequest object to clone
  * @returns A Promise that resolves to a new Request object with the same properties
  * @throws {HTTPException} If the request body was consumed directly via `req.raw`
  *   without using HonoRequest methods (e.g., `req.json()`, `req.text()`), making it
